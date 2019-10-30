@@ -1,0 +1,51 @@
+#!/bin/bash
+# Script: check_cert
+# Description: Monitor the expiration date of certificates in the file-system.
+# Author: Brian Wiborg <brian@flux.fail>
+# Date: 2019-10-30
+
+# CONFIG_FILE points to the central configuration file
+CONFIG_FILE="/etc/check_mk/agent/cert"
+
+MARK_CRIT=7
+MARK_WARN=30
+
+if [[ ! -f "$CONFIG_FILE" ]]; then
+  touch "$CONFIG_FILE"
+  chmod 600 "$CONFIG_FILE"
+fi
+
+MSG_UNKN="UNKNOWN - Can not parse certificate"
+MSG_CRIT="CRIT - Certificate expiring"
+MSG_WARN="WARN - Renewal is due"
+MSG_OK="OK - Last scanned at $(date)"
+
+check_cert() {
+  cert="${1}"
+  name="cert.expire.${cert}"
+  valid_until="$(date -d "$(openssl x509 -in ${cert} -noout -enddate | cut -d= -f 2)" +%s)"
+  today="$(date +%s)"
+  seconds_left="$(( valid_until - today ))"
+  days_left="$(( seconds_left / 60 / 60 / 24 ))"
+  re='^[0-9]+$'
+  if [[ ! $days_left =~ $re ]]; then
+    echo "3 ${name} - ${MSG_UNKN}"
+    return
+  fi
+  if (( days_left <= MARK_CRIT )); then
+    echo "2 ${name} days=${days_left} ${MSG_CRIT}"
+    return
+  elif (( days_left <= MARK_WARN )); then
+    echo "1 ${name} days=${days_left} ${MSG_WARN}"
+    return
+  fi
+  echo "0 ${name} days=${days_left} ${MSG_OK}"
+}
+
+IFS=$'\n'
+certs=( $(cat "$CONFIG_FILE") )
+unset IFS
+
+for cert in "${certs[@]}"; do
+  check_cert "${cert}"
+done
